@@ -1,5 +1,7 @@
 # Mac Mini Arch Tweaker
 
+[![ru](https://img.shields.io/badge/lang-ru-blue.svg)](README.ru.md)
+
 Tweaker script to optimize Arch Linux (and forks) for Mac Mini Late with integrated Intel graphics.
 
 Supported models are detected automatically via DMI:

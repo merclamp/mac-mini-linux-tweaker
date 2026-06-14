@@ -1,5 +1,7 @@
 # Mac Mini Arch Tweaker
 
+[![en](https://img.shields.io/badge/lang-en-red.svg)](README.md)
+
 Скрипт-твикер для оптимизации Arch Linux (и форков) под Mac Mini Late со встроенной графикой Intel.
 
 Поддерживаемые модели определяются автоматически по DMI:
