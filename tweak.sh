@@ -4,7 +4,7 @@
 # Оптимизация под Mac Mini Late (2012/2014/2018) со встроенной графикой Intel.
 # Включает: Vulkan, VGA/вирт.GPU, Zram, GPU-твики, CPU-твики, I/O, sysctl, звук, WiFi, TRIM.
 #===============================================================================
-set -euo pipefail
+set -uo pipefail
 
 # --- Цвета ---
 RED='\033[0;31m';    GREEN='\033[0;32m';    YELLOW='\033[1;33m'
@@ -14,6 +14,7 @@ NC='\033[0m'         # No Color
 # --- Глобальные флаги ---
 DRY_RUN=false
 FORCE=false
+INTERACTIVE=false
 BACKUP_DIR="/var/backups/mac-tweaker/$(date +%Y%m%d-%H%M%S)"
 LOG_FILE="/var/log/mac-tweaker.log"
 MODEL="unknown"
@@ -42,7 +43,7 @@ dry_cmd() {
     if $DRY_RUN; then
         log_warn "[DRY-RUN] $*"
     else
-        eval "$@"
+        eval "$@" || log_warn "Ошибка (не фатально): $*"
     fi
 }
 
@@ -57,6 +58,13 @@ check_arch() {
     if ! command -v pacman &>/dev/null; then
         log_err "Скрипт только для Arch Linux и форков (pacman не найден)"
         exit 1
+    fi
+    if ! command -v lspci &>/dev/null; then
+        log_msg "Устанавливаю pciutils (нужен lspci)..."
+        pacman -S --needed --noconfirm pciutils || {
+            log_err "Не удалось установить pciutils"
+            exit 1
+        }
     fi
     log_msg "Обновляю базу пакетов..."
     dry_cmd "pacman -Sy --noconfirm"
@@ -93,15 +101,15 @@ detect_mac_model() {
 
 detect_gpu() {
     log_hdr "Определение GPU"
-    if lspci | grep -qi "VGA.*Intel"; then
+    if lspci 2>/dev/null | grep -qi "VGA.*Intel"; then
         GPU="intel"
         local gpu_info
-        gpu_info=$(lspci | grep -i "VGA.*Intel" | head -1)
+        gpu_info=$(lspci 2>/dev/null | grep -i "VGA.*Intel" | head -1 || true)
         log_ok "Intel GPU: $gpu_info"
-    elif lspci | grep -qi "VGA.*NVIDIA"; then
+    elif lspci 2>/dev/null | grep -qi "VGA.*NVIDIA"; then
         GPU="nvidia"
         log_ok "NVIDIA GPU обнаружена"
-    elif lspci | grep -qi "VGA.*AMD"; then
+    elif lspci 2>/dev/null | grep -qi "VGA.*AMD"; then
         GPU="amd"
         log_ok "AMD GPU обнаружена"
     else
@@ -139,7 +147,7 @@ setup_vulkan() {
 setup_zram() {
     log_hdr "Настройка Zram"
 
-    dry_cmd "pacman -S --needed --noconfirm systemd-zram-generator"
+    dry_cmd "pacman -S --needed --noconfirm zram-generator"
 
     local conf="/etc/systemd/zram-generator.conf"
     backup_file "$conf"
@@ -153,14 +161,14 @@ swap-priority = 100
 ZRAMEOF
 
     if ! $DRY_RUN; then
-        # Перезагружаем systemd-zram-generator
+        # Перезагружаем zram-generator
         systemctl daemon-reload 2>/dev/null || true
         # Пытаемся запустить новый zram без перезагрузки
         systemctl restart systemd-zram-setup@zram0 2>/dev/null || true
 
         # Если старый swap-device был, выключаем
         swapoff /dev/zram0 2>/dev/null || true
-        # systemd-zram-generator сам поднимет
+        # zram-generator сам поднимет
         systemctl restart systemd-zram-setup@zram0 2>/dev/null || \
             log_warn "Zram: перезагрузка юнита не удалась — применится после ребута"
 
@@ -500,10 +508,10 @@ ENVEOF
 setup_wifi() {
     log_hdr "WiFi — Broadcom (если есть)"
 
-    if lspci | grep -qi "Broadcom.*Network"; then
+    if lspci 2>/dev/null | grep -qi "Broadcom.*Network"; then
         log_msg "Обнаружен Broadcom WiFi"
         # Пытаемся определить поколение
-        if lspci -nn | grep -qi "14e4:43a0\|14e4:43b1"; then
+        if lspci -nn 2>/dev/null | grep -qi "14e4:43a0\|14e4:43b1"; then
             # BCM4360/BCM43602 — нужен broadcom-wl
             dry_cmd "pacman -S --needed --noconfirm broadcom-wl-dkms linux-headers"
             if ! $DRY_RUN; then
@@ -623,7 +631,7 @@ setup_nvidia_legacy() {
     fi
 
     local nvidia_id
-    nvidia_id=$(lspci -nn | grep -i "VGA.*NVIDIA" | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}' | head -1)
+    nvidia_id=$(lspci -nn 2>/dev/null | grep -i "VGA.*NVIDIA" | grep -oP '\[\K[0-9a-f]{4}:[0-9a-f]{4}' | head -1 || true)
 
     case "$nvidia_id" in
         0863:*|0866:*|0867:*|086e:*|086f:*)
@@ -659,6 +667,7 @@ ${BOLD}Mac Mini Linux Tweaker v1.0${NC}
 ${BOLD}Опции:${NC}
   --dry-run        Показать, что будет сделано (без реальных изменений)
   --force          Не спрашивать подтверждений
+  --interactive,-i Выбрать отдельные модули (иначе — применить всё)
   --kernel zen|..  Выбор ядра: zen (по умолчанию) или cachyos
   --help           Эта справка
 
@@ -689,10 +698,12 @@ HELPEOF
 parse_args() {
     while [[ $# -gt 0 ]]; do
         case "$1" in
-            --dry-run) DRY_RUN=true; shift ;;
-            --force)   FORCE=true;   shift ;;
-            --kernel)  KERNEL_CHOICE="$2"; shift 2 ;;
-            --help)    show_help;    exit 0 ;;
+            --dry-run)     DRY_RUN=true; shift ;;
+            --force)       FORCE=true;   shift ;;
+            --interactive) INTERACTIVE=true; shift ;;
+            -i)            INTERACTIVE=true; shift ;;
+            --kernel)      KERNEL_CHOICE="$2"; shift 2 ;;
+            --help)        show_help;    exit 0 ;;
             *)
                 echo "Неизвестный аргумент: $1"
                 show_help
@@ -700,6 +711,85 @@ parse_args() {
                 ;;
         esac
     done
+}
+
+# --- Интерактивное меню ---
+
+select_modules() {
+    local modules=(
+        "Vulkan (mesa + vulkan-intel/radeon/nvidia)"
+        "Zram (zstd, 50% RAM)"
+        "Ядро linux-zen или linux-cachyos"
+        "Микрокод Intel"
+        "Параметры ядра i915 (FBC, GuC, Fastboot)"
+        "CPU governor → performance"
+        "I/O scheduler mq-deadline/bfq"
+        "sysctl (swappiness, BBR, буферы)"
+        "TRIM fstrim.timer для SSD"
+        "VA-API аппаратное видео-декодирование"
+        "WiFi Broadcom"
+        "Звук Apple Cirrus Logic"
+        "VGA / Framebuffer консоль"
+        "NVIDIA legacy (старые Mac Mini)"
+    )
+
+    echo ""
+    echo -e "  ${BOLD}Выбери модули (цифры через пробел, 'a' = все):${NC}"
+    echo "  0. ВСЕ"
+    for i in "${!modules[@]}"; do
+        printf "  %d. %s\n" $((i+1)) "${modules[$i]}"
+    done
+    echo ""
+
+    read -r -p "  Твой выбор [0]: " sel
+
+    if [[ -z "$sel" || "$sel" == "0" || "$sel" == "a" ]]; then
+        return 0  # run all
+    fi
+
+    # Сбрасываем — будем выполнять только выбранные
+    RUN_VULKAN=false; RUN_ZRAM=false; RUN_KERNEL=false; RUN_MICROCODE=false
+    RUN_KERNEL_PARAMS=false; RUN_CPU=false; RUN_IO=false; RUN_SYSCTL=false
+    RUN_FSTRIM=false; RUN_VAAPI=false; RUN_WIFI=false; RUN_AUDIO=false
+    RUN_VGA=false; RUN_NVIDIA=false
+
+    for num in $sel; do
+        case "$num" in
+            1)  RUN_VULKAN=true ;;
+            2)  RUN_ZRAM=true ;;
+            3)  RUN_KERNEL=true ;;
+            4)  RUN_MICROCODE=true ;;
+            5)  RUN_KERNEL_PARAMS=true ;;
+            6)  RUN_CPU=true ;;
+            7)  RUN_IO=true ;;
+            8)  RUN_SYSCTL=true ;;
+            9)  RUN_FSTRIM=true ;;
+            10) RUN_VAAPI=true ;;
+            11) RUN_WIFI=true ;;
+            12) RUN_AUDIO=true ;;
+            13) RUN_VGA=true ;;
+            14) RUN_NVIDIA=true ;;
+        esac
+    done
+    return 1  # selective run
+}
+
+# Второй main для выборочного запуска
+run_selected() {
+    if $RUN_VULKAN;        then setup_vulkan;        fi
+    if $RUN_ZRAM;          then setup_zram;          fi
+    if $RUN_KERNEL;        then setup_kernel;        fi
+    if $RUN_MICROCODE;     then setup_microcode;     fi
+    if $RUN_KERNEL_PARAMS; then setup_kernel_params; fi
+    if $RUN_CPU;           then setup_cpu_governor;  fi
+    if $RUN_IO;            then setup_io_scheduler;  fi
+    if $RUN_SYSCTL;        then setup_sysctl;        fi
+    if $RUN_FSTRIM;        then setup_fstrim;        fi
+    if $RUN_VAAPI;         then setup_vaapi;         fi
+    if $RUN_WIFI;          then setup_wifi;          fi
+    if $RUN_AUDIO;         then setup_audio;         fi
+    if $RUN_VGA;           then setup_vga;           fi
+    if $RUN_NVIDIA;        then setup_nvidia_legacy; fi
 }
 
 # --- Main ---
@@ -726,7 +816,22 @@ main() {
         [[ "$ans" != "y" && "$ans" != "Y" ]] && { log_msg "Отмена."; exit 0; }
     fi
 
-    # Выполнение оптимизаций
+    if $INTERACTIVE; then
+        select_modules
+        if [[ $? -eq 0 ]]; then
+            # Все модули
+            run_all
+        else
+            run_selected
+        fi
+    else
+        run_all
+    fi
+
+    print_summary
+}
+
+run_all() {
     setup_vulkan
     setup_zram
     setup_kernel
@@ -741,8 +846,6 @@ main() {
     setup_audio
     setup_vga
     setup_nvidia_legacy
-
-    print_summary
 }
 
 main "$@"

@@ -45,7 +45,7 @@ When choosing CachyOS, the script will download `cachyos-keyring`, `cachyos-mirr
 | 1 | **Detection** | Mac Mini model via DMI, GPU via lspci (Intel/NVIDIA/AMD) |
 | 2 | **Vulkan** | `mesa`, `vulkan-intel`/`radeon`/`nvidia`, `lib32-*`, `vulkan-tools` |
 | 3 | **Kernel** | `linux-zen` or `linux-cachyos` (performance), old `linux` removed |
-| 4 | **Zram** | `systemd-zram-generator`, 50% RAM, `zstd` compression, priority 100 |
+| 4 | **Zram** | `zram-generator`, 50% RAM, `zstd` compression, priority 100 |
 | 5 | **Kernel params** | `i915.enable_fbc=1 enable_guc=2 fastboot=1 mitigations=off` |
 | 6 | **CPU** | `cpupower` → governor `performance`, Intel P-state |
 | 7 | **I/O** | `mq-deadline` for SSD, `bfq` for HDD (udev rule) |
@@ -62,6 +62,7 @@ When choosing CachyOS, the script will download `cachyos-keyring`, `cachyos-mirr
 ```
 --dry-run           Show what will be done (no real changes)
 --force             Skip confirmation prompt
+--interactive, -i   Pick individual modules (otherwise applies all)
 --kernel zen|..     Kernel choice: zen (default) or cachyos
 --help              Show this help
 ```

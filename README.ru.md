@@ -45,7 +45,7 @@ sudo ./tweak.sh --kernel cachyos
 | 1 | **Обнаружение** | Модель Mac Mini по DMI, GPU через lspci (Intel/NVIDIA/AMD) |
 | 2 | **Vulkan** | `mesa`, `vulkan-intel`/`radeon`/`nvidia`, `lib32-*`, `vulkan-tools` |
 | 3 | **Ядро** | `linux-zen` или `linux-cachyos` (производительное), старое `linux` удаляется |
-| 4 | **Zram** | `systemd-zram-generator`, 50% RAM, сжатие `zstd`, priority 100 |
+| 4 | **Zram** | `zram-generator`, 50% RAM, сжатие `zstd`, priority 100 |
 | 5 | **Параметры ядра** | `i915.enable_fbc=1 enable_guc=2 fastboot=1 mitigations=off` |
 | 6 | **CPU** | `cpupower` → governor `performance`, Intel P-state |
 | 7 | **I/O** | `mq-deadline` для SSD, `bfq` для HDD (udev-правило) |
@@ -62,6 +62,7 @@ sudo ./tweak.sh --kernel cachyos
 ```
 --dry-run           Показать, что будет сделано (без реальных изменений)
 --force             Не запрашивать подтверждение
+--interactive, -i   Выбрать отдельные модули (иначе — применить всё)
 --kernel zen|..     Выбор ядра: zen (по умолчанию) или cachyos
 --help              Справка
 ```
